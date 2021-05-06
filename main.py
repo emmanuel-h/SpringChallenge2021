@@ -13,14 +13,43 @@ class Tree:
         self.is_dormant = is_dormant
 
 
+def complete(trees):
+    trees_to_complete = [t for t in trees if t.is_mine == 1 and t.is_dormant == 0 and t.size == 3]
+    if not trees_to_complete:
+        return
+    else:
+        return 'COMPLETE ' + str(trees_to_complete[0].cell_index)
+
+
+def grow(trees, size):
+    trees_to_grow = [t for t in trees if t.is_mine == 1 and t.is_dormant == 0 and t.size == size]
+    if not trees_to_grow:
+        return
+    else:
+        return 'GROW ' + str(trees_to_grow[0].cell_index)
+
+
+def calculate_grow_1(trees):
+    return 3 + len([t for t in trees if t.is_mine == 1 and t.size == 2])
+
+
+def calculate_grow_2(trees):
+    return 7 + len([t for t in trees if t.is_mine == 1 and t.size == 3])
+
+
 def sort_trees(tree):
     return tree.size + cells[tree.cell_index]
 
 
-def calculate_move(trees):
-    my_trees = [t for t in trees if t.is_mine == 1]
-    my_trees.sort(reverse=True, key=sort_trees)
-    return 'COMPLETE ' + str(my_trees[0].cell_index)
+def calculate_move(trees, sun_points):
+    action = complete(trees)
+    if action:
+        return action
+    if calculate_grow_2(trees) <= sun_points:
+        return grow(trees, 2)
+    if calculate_grow_1(trees) <= sun_points:
+        return grow(trees, 1)
+    return 'WAIT'
 
 
 number_of_cells = int(input())  # 37
@@ -70,5 +99,6 @@ while True:
     if len(possible_moves) == 1:
         print(possible_moves[0])
     else:
-        move = calculate_move(trees)
+        trees.sort(reverse=True, key=sort_trees)
+        move = calculate_move(trees, sun)
         print(move)
