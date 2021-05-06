@@ -1,5 +1,4 @@
 import sys
-import math
 
 
 class Tree:
@@ -15,7 +14,7 @@ def complete(trees):
     if not trees_to_complete:
         return
     else:
-        return 'COMPLETE ' + str(trees_to_complete[0].cell_index)
+        return f'COMPLETE {trees_to_complete[0].cell_index}'
 
 
 def grow(trees, size):
@@ -23,7 +22,7 @@ def grow(trees, size):
     if not trees_to_grow:
         return
     else:
-        return 'GROW ' + str(trees_to_grow[0].cell_index)
+        return f'GROW {trees_to_grow[0].cell_index}'
 
 
 def calculate_grow_1(trees):
@@ -49,9 +48,11 @@ def calculate_move(trees, sun_points):
     return 'WAIT'
 
 
+cells = []
+
+
 def main():
     number_of_cells = int(input())  # 37
-    cells = []
     for i in range(number_of_cells):
         # index: 0 is the center cell, the next cells spiral outwards
         # richness: 0 if the cell is unusable, 1-3 for usable cells
@@ -81,10 +82,7 @@ def main():
             is_dormant = inputs[3] != "0"  # 1 if this tree is dormant
             trees.insert(cell_index, Tree(cell_index, size, is_mine, is_dormant))
         number_of_possible_moves = int(input())
-        possible_moves = []
-        for i in range(number_of_possible_moves):
-            possible_move = input()
-            possible_moves.insert(i, possible_move)
+        possible_moves = [input() for _ in range(number_of_possible_moves)]
 
         print(possible_moves, file=sys.stderr, flush=True)
 
