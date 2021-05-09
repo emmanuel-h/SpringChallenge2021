@@ -9,6 +9,12 @@ class Tree:
         self.is_dormant = is_dormant
 
 
+class Cell:
+    def __init__(self, index, richness):
+        self.index = index
+        self.richness = richness
+
+
 def complete(trees):
     trees_to_complete = [t for t in trees if t.is_mine == 1 and t.is_dormant == 0 and t.size == 3]
     if not trees_to_complete:
@@ -25,6 +31,23 @@ def grow(trees, size):
         return f'GROW {trees_to_grow[0].cell_index}'
 
 
+def seed(trees):
+    cells_to_seed = [c for c in cells if
+                     c.richness > 0 and bool([t for t in trees if t.cell_index == c.index]) is False]
+    if not cells_to_seed:
+        return
+    else:
+        return f'SEED {cells_to_seed[0].index}'
+
+
+def calculate_seed(trees):
+    return len([t for t in trees if t.is_mine == 1 and t.size == 0])
+
+
+def calculate_grow_0(trees):
+    return 1 + len([t for t in trees if t.is_mine == 1 and t.size == 1])
+
+
 def calculate_grow_1(trees):
     return 3 + len([t for t in trees if t.is_mine == 1 and t.size == 2])
 
@@ -34,7 +57,11 @@ def calculate_grow_2(trees):
 
 
 def sort_trees(tree):
-    return tree.size + cells[tree.cell_index]
+    return tree.size + cells[tree.cell_index].richness
+
+
+def sort_cells(cell):
+    return cell.richness
 
 
 def calculate_move(trees, sun_points):
@@ -45,6 +72,10 @@ def calculate_move(trees, sun_points):
         return grow(trees, 2)
     if calculate_grow_1(trees) <= sun_points:
         return grow(trees, 1)
+    if calculate_grow_0(trees) <= sun_points:
+        return grow(trees, 0)
+    # if calculate_seed(trees) <= sun_points:
+        # return seed(trees)
     return 'WAIT'
 
 
@@ -58,7 +89,9 @@ def main():
         # richness: 0 if the cell is unusable, 1-3 for usable cells
         # neigh_0: the index of the neighbouring cell for each direction
         index, richness, neigh_0, neigh_1, neigh_2, neigh_3, neigh_4, neigh_5 = [int(j) for j in input().split()]
-        cells.insert(index, richness)
+        cells.append(Cell(index, richness))
+
+    cells.sort(reverse=True, key=sort_cells)
 
     # game loop
     while True:
