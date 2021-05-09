@@ -453,13 +453,11 @@ def create_children(node):
                     if cells[cell_index].richness > 0 and node.state.trees[cell_index] is None:
                         cells_to_seed.append((tree.cell_index, cells[cell_index]))
         for (source_cell, target_cell) in cells_to_seed:
-            print(node.state.trees, file=sys.stderr, flush=True)
-            print(source_cell, file=sys.stderr, flush=True)
             new_state = copy.deepcopy(node.state)
             tree = Tree(cell_index=target_cell.index, size=0, is_mine=True, is_dormant=True)
-            new_state.trees.insert(target_cell.index, tree)
+            new_state.trees[target_cell.index] = tree
             new_state.trees[source_cell].sleep()
-            new_state.sun -= node.state.trees.size[0]
+            new_state.sun -= node.state.trees_size[0]
             node.add_child(new_state)
 
     return node
@@ -484,7 +482,7 @@ def mcts_backpropagation():
 
 def find_best_choice(current_state):
     root = create_children(Node(parent_node=None, state=current_state))
-    mcts_selection([root])
+    mcts_selection(root.children)
     mcts_expansion()
     mcts_simulation()
     mcts_backpropagation()
@@ -516,7 +514,10 @@ def main():
         opp_is_waiting = inputs[2] != "0"  # whether your opponent is asleep until the next day
         number_of_trees = int(input())  # the current amount of trees
 
-        trees = [None] * 37
+        trees = [None, None, None, None, None, None, None, None, None, None,
+                 None, None, None, None, None, None, None, None, None, None,
+                 None, None, None, None, None, None, None, None, None, None,
+                 None, None, None, None, None, None, None]
         trees_size = [0, 0, 0, 0]
         for i in range(number_of_trees):
             inputs = input().split()
@@ -524,7 +525,7 @@ def main():
             size = int(inputs[1])  # size of this tree: 0-3
             is_mine = inputs[2] != "0"  # 1 if this is your tree
             is_dormant = inputs[3] != "0"  # 1 if this tree is dormant
-            trees.insert(cell_index, Tree(cell_index, size, is_mine, is_dormant))
+            trees[cell_index] = Tree(cell_index, size, is_mine, is_dormant)
             if is_mine:
                 trees_size[size] += 1
 
@@ -532,8 +533,6 @@ def main():
 
         number_of_possible_moves = int(input())
         possible_moves = [input() for _ in range(number_of_possible_moves)]
-
-        print(possible_moves, file=sys.stderr, flush=True)
 
         # Write an action using print
         # To debug: print("Debug messages...", file=sys.stderr, flush=True)
