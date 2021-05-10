@@ -388,54 +388,53 @@ class Cell:
         self.neighbors = neighbors
 
 
-class State:
-    def __init__(self, day, nutrient, sun, score, opp_sun, opp_score, opp_is_waiting, number_of_trees, trees, action, trees_size):
-        self.trees_size = trees_size
+class PlayerState:
+    def __init__(self, sun, score, trees_size, game_state, action, is_waiting):
         self.action = action
-        self.trees = trees
-        self.number_of_trees = number_of_trees
-        self.opp_is_waiting = opp_is_waiting
-        self.opp_score = opp_score
-        self.opp_sun = opp_sun
+        self.game_state = game_state
+        self.trees_size = trees_size
         self.score = score
         self.sun = sun
-        self.nutrient = nutrient
-        self.day = day
+        self.is_waiting = is_waiting
 
     def possible_next_moves(self):
         list_actions = []
+        # If last action was WAIT, its the only available
+        if self.is_waiting:
+            return [Action(ActionType.WAIT)]
+
         if self.sun >= 4:
-            trees_3 = [t for t in self.trees if t is not None and t.size == 3 and not t.is_dormant and t.is_mine]
+            trees_3 = [t for t in self.game_state.trees if t is not None and t.size == 3 and not t.is_dormant and t.is_mine]
             for tree_3 in trees_3:
                 list_actions.append(Action(ActionType.COMPLETE, tree_3.cell_index))
 
         # Add GROW to size 3 actions when possible
         if self.sun >= 7 + self.trees_size[3]:
-            trees_2 = [t for t in self.trees if t is not None and t.size == 2 and not t.is_dormant and t.is_mine]
+            trees_2 = [t for t in self.game_state.trees if t is not None and t.size == 2 and not t.is_dormant and t.is_mine]
             for tree_2 in trees_2:
                 list_actions.append(Action(ActionType.GROW, tree_2.cell_index))
 
         # Add GROW to size 2 actions when possible
         if self.sun >= 3 + self.trees_size[2]:
-            trees_1 = [t for t in self.trees if t is not None and t.size == 1 and not t.is_dormant and t.is_mine]
+            trees_1 = [t for t in self.game_state.trees if t is not None and t.size == 1 and not t.is_dormant and t.is_mine]
             for tree_1 in trees_1:
                 list_actions.append(Action(ActionType.GROW, tree_1.cell_index))
 
         # Add GROW to size 1 actions when possible
         if self.sun >= 1 + self.trees_size[1]:
-            trees_0 = [t for t in self.trees if t is not None and t.size == 0 and not t.is_dormant and t.is_mine]
+            trees_0 = [t for t in self.game_state.trees if t is not None and t.size == 0 and not t.is_dormant and t.is_mine]
             for tree_0 in trees_0:
                 list_actions.append(Action(ActionType.GROW, tree_0.cell_index))
 
         # Add SEED actions when possible
         if self.sun >= self.trees_size[0]:
             cells_to_seed = []
-            for tree in [t for t in self.trees if t is not None]:
+            for tree in [t for t in self.game_state.trees if t is not None]:
                 # Add a class method to test if a tree can be used
                 if not tree.is_dormant and tree.is_mine:
                     cells_indexes = distance_seedable_cells[tree.cell_index][tree.size - 1]
                     for cell_index in cells_indexes:
-                        if cells[cell_index].richness > 0 and self.trees[cell_index] is None:
+                        if cells[cell_index].richness > 0 and self.game_state.trees[cell_index] is None:
                             cells_to_seed.append((tree.cell_index, cell_index))
             for (source_cell, target_cell) in cells_to_seed:
                 list_actions.append(Action(ActionType.SEED, target_cell, source_cell))
@@ -450,45 +449,56 @@ class State:
     def get_new_state(self, action):
         if action.type == ActionType.COMPLETE:
             new_state = copy.deepcopy(self)
-            new_state.trees[action.destination] = None
+            new_state.game_state.trees[action.destination] = None
             bonus = 0 if cells[action.destination].richness == 1 else 2 if cells[action.destination].richness == 2 else 4
-            new_state.score += bonus + new_state.nutrient
-            new_state.nutrient -= 1
+            new_state.score += bonus + new_state.game_state.nutrient
+            new_state.game_state.nutrient -= 1
             new_state.sun -= 4
             new_state.action = action
             new_state.trees_size[3] -= 1
             return new_state
         if action.type == ActionType.GROW:
             new_state = copy.deepcopy(self)
-            new_state.trees[action.destination].grow()
-            new_state.sun -= (7 + self.trees_size[3]) if self.trees[action.destination].size == 2 else (3 + self.trees_size[2]) if self.trees[action.destination].size == 1 else (1 + self.trees_size[1])
+            new_state.game_state.trees[action.destination].grow()
+            new_state.sun -= (7 + self.trees_size[3]) if self.game_state.trees[action.destination].size == 2 else (3 + self.trees_size[2]) if self.game_state.trees[action.destination].size == 1 else (1 + self.trees_size[1])
             new_state.action = action
-            new_state.trees_size[self.trees[action.destination].size] += 1
+            new_state.trees_size[self.game_state.trees[action.destination].size] += 1
             return new_state
         if action.type == ActionType.SEED:
             new_state = copy.deepcopy(self)
             tree = Tree(cell_index=action.destination, size=0, is_mine=True, is_dormant=True)
-            new_state.trees[action.destination] = tree
-            new_state.trees[action.source].sleep()
+            new_state.game_state.trees[action.destination] = tree
+            new_state.game_state.trees[action.source].sleep()
             new_state.sun -= self.trees_size[0]
             new_state.trees_size[0] += 1
             new_state.action = action
             return new_state
         if action.type == ActionType.WAIT:
             new_state = copy.deepcopy(self)
-            new_state.day += 1
+            new_state.game_state.day += 1
             # TODO: Add shadow calculation
             new_state.sun += new_state.trees_size[3] * 3 + new_state.trees_size[2] * 2 + new_state.trees_size[1]
             new_state.action = action
+            new_state.is_waiting = True
             return new_state
+
+
+class GameState:
+    def __init__(self, day, nutrient, number_of_trees, trees):
+        self.number_of_trees = number_of_trees
+        self.nutrient = nutrient
+        self.day = day
+        self.trees = trees
 
     def is_final(self):
         return self.day == 24
 
 
 class Node:
-    def __init__(self, parent_node, state):
-        self.state = state
+    def __init__(self, parent_node, game_state, player_state, opponent_state):
+        self.opponent_state = opponent_state
+        self.player_state = player_state
+        self.game_state = game_state
         self.parent_node = parent_node
         self.children = []
         self.total_games = 1
@@ -501,8 +511,8 @@ class Node:
         parent_total_games = self.parent_node.total_games if self.parent_node else 0
         return (self.won_games / self.total_games) + math.sqrt(2) * math.sqrt((math.log2(parent_total_games)) / self.total_games)
 
-    def add_child(self, state):
-        self.children.append(Node(parent_node=self, state=state))
+    def add_child(self, game_state, player_state, opponent_state):
+        self.children.append(Node(self, game_state, player_state, opponent_state))
 
 
 def mcts_selection(nodes):
@@ -511,9 +521,9 @@ def mcts_selection(nodes):
 
 
 def mcts_expansion(node):
-    possible_moves = node.state.possible_next_moves()
+    possible_moves = node.player_state.possible_next_moves()
     for possible_move in possible_moves:
-        node.add_child(node.state.get_new_state(possible_move))
+        node.add_child(node.player_state.get_new_state(possible_move))
     return node
 
 
@@ -527,15 +537,20 @@ def mcts_backpropagation():
 
 def find_best_choice(node):
     best_node = mcts_selection(node.children)
-    mcts_expansion(best_node)
+    best_node_with_children = mcts_expansion(best_node)
+
+    # Randomly select one of the children
+    best_node_with_children.player_state.get_new_state(best_node_with_children.player_state.random_next_move())
+
+
     mcts_simulation()
     mcts_backpropagation()
     return 'WAIT'
 
 
 # Not sure this initialization is useful
-def init_mcts(current_state):
-    node = mcts_expansion(Node(parent_node=None, state=current_state))
+def init_mcts(game_state, player_state, opponent_state):
+    node = mcts_expansion(Node(None, game_state, player_state, opponent_state))
     return find_best_choice(node)
 
 
@@ -549,6 +564,7 @@ def main():
         # richness: 0 if the cell is unusable, 1-3 for usable cells
         # neigh_0: the index of the neighbouring cell for each direction
         index, richness, neigh_0, neigh_1, neigh_2, neigh_3, neigh_4, neigh_5 = [int(j) for j in input().split()]
+        # TODO: Potentially useless saving of neighbors
         cells.append(Cell(index, richness, [c for c in (neigh_0, neigh_1, neigh_2, neigh_3, neigh_4, neigh_5) if c != -1]))
 
     # game loop
@@ -570,6 +586,7 @@ def main():
                  None, None, None, None, None, None, None]
         # trees = []
         trees_size = [0, 0, 0, 0]
+        opponent_trees_size = [0, 0, 0, 0]
         for i in range(number_of_trees):
             inputs = input().split()
             cell_index = int(inputs[0])  # location of this tree
@@ -579,8 +596,8 @@ def main():
             trees[cell_index] = Tree(cell_index, size, is_mine, is_dormant)
             if is_mine:
                 trees_size[size] += 1
-
-        current_state = State(day, nutrients, sun, score, opp_sun, opp_score, opp_is_waiting, number_of_trees, trees, None, trees_size)
+            else:
+                opponent_trees_size[size] += 1
 
         number_of_possible_moves = int(input())
         possible_moves = [input() for _ in range(number_of_possible_moves)]
@@ -592,7 +609,12 @@ def main():
         if len(possible_moves) == 1:
             print(possible_moves[0])
         else:
-            move = init_mcts(current_state)
+
+            game_state = GameState(day, nutrients, number_of_trees, trees)
+            player = PlayerState(sun, score, trees_size, game_state, None, False)
+            opponent = PlayerState(opp_sun, opp_score, opponent_trees_size, game_state, None, opp_is_waiting)
+
+            move = init_mcts(game_state, player, opponent)
             print(move)
 
 
