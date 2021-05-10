@@ -1,6 +1,8 @@
 import copy
+import random
 import sys
 import math
+from enum import Enum
 
 distance_seedable_cells = [
     # Index 0
@@ -339,6 +341,28 @@ distance_seedable_cells = [
 ]
 
 
+class ActionType(Enum):
+    COMPLETE = "COMPLETE"
+    GROW = "GROW"
+    SEED = "SEED"
+    WAIT = "WAIT"
+
+
+class Action:
+    def __init__(self, type, destination=None, source=None):
+        self.type = type
+        self.destination = destination
+        self.source = source
+
+    def __str__(self):
+        if self.type == ActionType.WAIT:
+            return 'WAIT'
+        elif self.type == ActionType.SEED:
+            return f'SEED {self.source} {self.destination}'
+        else:
+            return f'{self.type.name} {self.destination}'
+
+
 class Tree:
     def __init__(self, cell_index, size, is_mine, is_dormant):
         self.cell_index = cell_index
@@ -378,89 +402,107 @@ class State:
         self.nutrient = nutrient
         self.day = day
 
+    def possible_next_moves(self):
+        list_actions = []
+        if self.sun >= 4:
+            trees_3 = [t for t in self.trees if t is not None and t.size == 3 and not t.is_dormant and t.is_mine]
+            for tree_3 in trees_3:
+                list_actions.append(Action(ActionType.COMPLETE, tree_3.cell_index))
+
+        # Add GROW to size 3 actions when possible
+        if self.sun >= 7 + self.trees_size[3]:
+            trees_2 = [t for t in self.trees if t is not None and t.size == 2 and not t.is_dormant and t.is_mine]
+            for tree_2 in trees_2:
+                list_actions.append(Action(ActionType.GROW, tree_2.cell_index))
+
+        # Add GROW to size 2 actions when possible
+        if self.sun >= 3 + self.trees_size[2]:
+            trees_1 = [t for t in self.trees if t is not None and t.size == 1 and not t.is_dormant and t.is_mine]
+            for tree_1 in trees_1:
+                list_actions.append(Action(ActionType.GROW, tree_1.cell_index))
+
+        # Add GROW to size 1 actions when possible
+        if self.sun >= 1 + self.trees_size[1]:
+            trees_0 = [t for t in self.trees if t is not None and t.size == 0 and not t.is_dormant and t.is_mine]
+            for tree_0 in trees_0:
+                list_actions.append(Action(ActionType.GROW, tree_0.cell_index))
+
+        # Add SEED actions when possible
+        if self.sun >= self.trees_size[0]:
+            cells_to_seed = []
+            for tree in [t for t in self.trees if t is not None]:
+                # Add a class method to test if a tree can be used
+                if not tree.is_dormant and tree.is_mine:
+                    cells_indexes = distance_seedable_cells[tree.cell_index][tree.size - 1]
+                    for cell_index in cells_indexes:
+                        if cells[cell_index].richness > 0 and self.trees[cell_index] is None:
+                            cells_to_seed.append((tree.cell_index, cell_index))
+            for (source_cell, target_cell) in cells_to_seed:
+                list_actions.append(Action(ActionType.SEED, target_cell, source_cell))
+
+        # Add WAIT action which is always possible
+        list_actions.append(Action(ActionType.WAIT))
+        return list_actions
+
+    def random_next_move(self):
+        return random.choice(self.possible_next_moves())
+
+    def get_new_state(self, action):
+        if action.type == ActionType.COMPLETE:
+            new_state = copy.deepcopy(self)
+            new_state.trees[action.destination] = None
+            bonus = 0 if cells[action.destination].richness == 1 else 2 if cells[action.destination].richness == 2 else 4
+            new_state.score += bonus + new_state.nutrient
+            new_state.nutrient -= 1
+            new_state.sun -= 4
+            new_state.action = action
+            new_state.trees_size[3] -= 1
+            return new_state
+        if action.type == ActionType.GROW:
+            new_state = copy.deepcopy(self)
+            new_state.trees[action.destination].grow()
+            new_state.sun -= (7 + self.trees_size[3]) if self.trees[action.destination].size == 2 else (3 + self.trees_size[2]) if self.trees[action.destination].size == 1 else (1 + self.trees_size[1])
+            new_state.action = action
+            new_state.trees_size[self.trees[action.destination].size] += 1
+            return new_state
+        if action.type == ActionType.SEED:
+            new_state = copy.deepcopy(self)
+            tree = Tree(cell_index=action.destination, size=0, is_mine=True, is_dormant=True)
+            new_state.trees[action.destination] = tree
+            new_state.trees[action.source].sleep()
+            new_state.sun -= self.trees_size[0]
+            new_state.trees_size[0] += 1
+            new_state.action = action
+            return new_state
+        if action.type == ActionType.WAIT:
+            new_state = copy.deepcopy(self)
+            new_state.day += 1
+            # TODO: Add shadow calculation
+            new_state.sun += new_state.trees_size[3] * 3 + new_state.trees_size[2] * 2 + new_state.trees_size[1]
+            new_state.action = action
+            return new_state
+
+    def is_final(self):
+        return self.day == 24
+
 
 class Node:
     def __init__(self, parent_node, state):
         self.state = state
         self.parent_node = parent_node
         self.children = []
-        self.total_games = 0
+        self.total_games = 1
         self.won_games = 0
 
+    def __repr__(self):
+        return f'Parent: [{self.parent_node}], Total games: {self.total_games}, Won games: {self.won_games}'
+
     def uct_value(self):
-        return (self.won_games / self.total_games) + math.sqrt(2) * math.sqrt((math.log2(self.parent_node.total_games)) / self.total_games)
+        parent_total_games = self.parent_node.total_games if self.parent_node else 0
+        return (self.won_games / self.total_games) + math.sqrt(2) * math.sqrt((math.log2(parent_total_games)) / self.total_games)
 
     def add_child(self, state):
         self.children.append(Node(parent_node=self, state=state))
-
-
-# TODO: Add shadow calculation
-def create_children(node):
-    # Add COMPLETE actions when possible
-    if node.state.sun >= 4:
-        trees_3 = [t for t in node.state.trees if t.size == 3 and not t.is_dormant and t.is_mine]
-        for tree_3 in trees_3:
-            new_state = copy.deepcopy(node.state)
-            new_state.trees[tree_3.cell_index] = None
-            new_state.score += cells[tree_3.cell_index].richness + new_state.nutrient
-            new_state.nutrient -= 1
-            new_state.sun -= 4
-            new_state.sun += new_state.trees_size[3] * 3 + new_state.trees_size[2] * 2 + new_state.trees_size[1]
-            new_state.action = f'COMPLETE {tree_3.cell_index}'
-            node.add_child(new_state)
-
-    # Add GROW to size 3 actions when possible
-    if node.state.sun >= 7 + node.state.trees_size[3]:
-        trees_2 = [t for t in node.state.trees if t.size == 2 and not t.is_dormant and t.is_mine]
-        for tree_2 in trees_2:
-            new_state = copy.deepcopy(node.state)
-            new_state.trees[tree_2.cell_index].grow()
-            new_state.sun -= (7 + node.state.trees_size[3])
-            new_state.sun += new_state.trees_size[3] * 3 + new_state.trees_size[2] * 2 + new_state.trees_size[1]
-            new_state.action = f'GROW {tree_2.cell_index}'
-            node.add_child(new_state)
-
-    # Add GROW to size 2 actions when possible
-    if node.state.sun >= 3 + node.state.trees_size[2]:
-        trees_1 = [t for t in node.state.trees if t.size == 1 and not t.is_dormant and t.is_mine]
-        for tree_1 in trees_1:
-            new_state = copy.deepcopy(node.state)
-            new_state.trees[tree_1.cell_index].grow()
-            new_state.sun -= (3 + node.state.trees_size[2])
-            new_state.sun += new_state.trees_size[3] * 3 + new_state.trees_size[2] * 2 + new_state.trees_size[1]
-            new_state.action = f'GROW {tree_1.cell_index}'
-            node.add_child(new_state)
-
-    # Add GROW to size 1 actions when possible
-    if node.state.sun >= 1 + node.state.trees_size[1]:
-        trees_0 = [t for t in node.state.trees if t.size == 0 and not t.is_dormant and t.is_mine]
-        for tree_0 in trees_0:
-            new_state = copy.deepcopy(node.state)
-            new_state.trees[tree_0.cell_index].grow()
-            new_state.sun -= (1 + node.state.trees_size[1])
-            new_state.sun += new_state.trees_size[3] * 3 + new_state.trees_size[2] * 2 + new_state.trees_size[1]
-            new_state.action = f'GROW {tree_0.cell_index}'
-            node.add_child(new_state)
-
-    # Add SEED actions when possible
-    if node.state.sun >= node.state.trees_size[0]:
-        cells_to_seed = []
-        for tree in [t for t in node.state.trees if t is not None]:
-            # Add a class method to test if a tree can be used
-            if not tree.is_dormant and tree.is_mine:
-                cells_indexes = distance_seedable_cells[tree.cell_index][tree.size - 1]
-                for cell_index in cells_indexes:
-                    if cells[cell_index].richness > 0 and node.state.trees[cell_index] is None:
-                        cells_to_seed.append((tree.cell_index, cells[cell_index]))
-        for (source_cell, target_cell) in cells_to_seed:
-            new_state = copy.deepcopy(node.state)
-            tree = Tree(cell_index=target_cell.index, size=0, is_mine=True, is_dormant=True)
-            new_state.trees[target_cell.index] = tree
-            new_state.trees[source_cell].sleep()
-            new_state.sun -= node.state.trees_size[0]
-            node.add_child(new_state)
-
-    return node
 
 
 def mcts_selection(nodes):
@@ -468,8 +510,11 @@ def mcts_selection(nodes):
     return nodes[0]
 
 
-def mcts_expansion():
-    return
+def mcts_expansion(node):
+    possible_moves = node.state.possible_next_moves()
+    for possible_move in possible_moves:
+        node.add_child(node.state.get_new_state(possible_move))
+    return node
 
 
 def mcts_simulation():
@@ -480,13 +525,18 @@ def mcts_backpropagation():
     return
 
 
-def find_best_choice(current_state):
-    root = create_children(Node(parent_node=None, state=current_state))
-    mcts_selection(root.children)
-    mcts_expansion()
+def find_best_choice(node):
+    best_node = mcts_selection(node.children)
+    mcts_expansion(best_node)
     mcts_simulation()
     mcts_backpropagation()
     return 'WAIT'
+
+
+# Not sure this initialization is useful
+def init_mcts(current_state):
+    node = mcts_expansion(Node(parent_node=None, state=current_state))
+    return find_best_choice(node)
 
 
 cells = []
@@ -518,6 +568,7 @@ def main():
                  None, None, None, None, None, None, None, None, None, None,
                  None, None, None, None, None, None, None, None, None, None,
                  None, None, None, None, None, None, None]
+        # trees = []
         trees_size = [0, 0, 0, 0]
         for i in range(number_of_trees):
             inputs = input().split()
@@ -541,7 +592,7 @@ def main():
         if len(possible_moves) == 1:
             print(possible_moves[0])
         else:
-            move = find_best_choice(current_state)
+            move = init_mcts(current_state)
             print(move)
 
 
