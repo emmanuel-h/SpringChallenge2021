@@ -1,3 +1,4 @@
+import cProfile
 import copy
 import datetime
 import random
@@ -6,6 +7,7 @@ import sys
 import time
 import timeit
 from enum import Enum
+import re
 
 distance_seedable_cells = [
     # Index 0
@@ -468,48 +470,36 @@ class GameState:
         self.opponent_state.action = opponent_action
         # COMPLETE
         if player_action.type == ActionType.COMPLETE:
-            # Potentially useless when in simulation
-            # new_state = copy.deepcopy(self.player_state)
             self.trees[player_action.destination] = None
             bonus = 0 if cells[player_action.destination].richness == 1 else 2 if cells[player_action.destination].richness == 2 else 4
             self.player_state.score += bonus + self.nutrient
-            self.nutrient -= 1
             self.player_state.sun -= 4
             self.player_state.trees_size[3] -= 1
-            # return new_state
         if opponent_action.type == ActionType.COMPLETE:
-            # Potentially useless when in simulation
-            # new_state = copy.deepcopy(self.player_state)
             self.trees[opponent_action.destination] = None
             bonus = 0 if cells[opponent_action.destination].richness == 1 else 2 if cells[opponent_action.destination].richness == 2 else 4
             self.opponent_state.score += bonus + self.nutrient
-            self.nutrient -= 1
             self.opponent_state.sun -= 4
             self.opponent_state.trees_size[3] -= 1
-            # return new_state
 
         # end turn adjustments for COMPLETE actions
         if player_action.type == ActionType.COMPLETE and opponent_action.type == ActionType.COMPLETE:
             self.nutrient -= 2
             # Don't go further if both players already did their action
             return
-        if player_action.type == ActionType.COMPLETE and opponent_action.type == ActionType.COMPLETE:
+        if player_action.type == ActionType.COMPLETE or opponent_action.type == ActionType.COMPLETE:
             self.nutrient -= 1
 
         # GROW
         if player_action.type == ActionType.GROW:
-            # new_state = copy.deepcopy(self)
             self.trees[player_action.destination].grow()
             self.player_state.sun -= (7 + self.player_state.trees_size[3]) if self.trees[player_action.destination].size == 2 else (3 + self.player_state.trees_size[2]) if self.trees[player_action.destination].size == 1 else (1 + self.player_state.trees_size[1])
             self.player_state.trees_size[self.trees[player_action.destination].size] += 1
-            # return new_state
 
         if opponent_action.type == ActionType.GROW:
-            # new_state = copy.deepcopy(self)
             self.trees[opponent_action.destination].grow()
             self.opponent_state.sun -= (7 + self.opponent_state.trees_size[3]) if self.trees[opponent_action.destination].size == 2 else (3 + self.opponent_state.trees_size[2]) if self.trees[opponent_action.destination].size == 1 else (1 + self.opponent_state.trees_size[1])
             self.opponent_state.trees_size[self.trees[opponent_action.destination].size] += 1
-            # return new_state
 
         # SEED
         if player_action.type == ActionType.SEED and opponent_action.type == ActionType.SEED and int(player_action.destination) == int(opponent_action.destination):
@@ -519,33 +509,25 @@ class GameState:
             return
 
         if player_action.type == ActionType.SEED:
-            # new_state = copy.deepcopy(self)
             tree = Tree(cell_index=player_action.destination, size=0, is_mine=True, is_dormant=True)
             self.trees[player_action.destination] = tree
             self.trees[player_action.source].sleep()
             self.player_state.sun -= self.player_state.trees_size[0]
             self.player_state.trees_size[0] += 1
-            # return new_state
 
         if opponent_action.type == ActionType.SEED:
-            # new_state = copy.deepcopy(self)
-            tree = Tree(cell_index=opponent_action.destination, size=0, is_mine=True, is_dormant=True)
+            tree = Tree(cell_index=opponent_action.destination, size=0, is_mine=False, is_dormant=True)
             self.trees[opponent_action.destination] = tree
             self.trees[opponent_action.source].sleep()
             self.opponent_state.sun -= self.opponent_state.trees_size[0]
             self.opponent_state.trees_size[0] += 1
-            # return new_state
 
         # WAIT
         if player_action.type == ActionType.WAIT:
-            # new_state = copy.deepcopy(self)
             self.player_state.is_waiting = True
-            # return new_state
 
         if opponent_action.type == ActionType.WAIT:
-            # new_state = copy.deepcopy(self)
             self.opponent_state.is_waiting = True
-            # return new_state
 
         if player_action.type == ActionType.WAIT and opponent_action.type == ActionType.WAIT:
             self.day += 1
@@ -555,11 +537,11 @@ class GameState:
 
     def player_wins(self):
         player_score = self.player_state.score + int(self.player_state.sun / 3)
-        opponent_score = self.player_state.score + int(self.player_state.sun / 3)
+        opponent_score = self.opponent_state.score + int(self.opponent_state.sun / 3)
         if player_score != opponent_score:
             return player_score > opponent_score
         # Check if summing trees_size is faster
-        return len([t for t in self.trees if t is not None and t.is_mine]) > len([t for t in self.trees if t is not None and t.is_mine])
+        return len([t for t in self.trees if t is not None and t.is_mine]) > len([t for t in self.trees if t is not None and not t.is_mine])
 
     def __repr__(self):
         return f'player_state: [{self.player_state}], opponent_state: [{self.opponent_state}]'
@@ -592,7 +574,7 @@ def mcts_selection(nodes):
 
 def mcts_expansion(node):
     possible_moves = node.game_state.player_state.possible_next_moves(node.game_state.trees, True)
-    opponent_possible_moves = node.game_state.opponent_state.possible_next_moves(node.game_state.trees, False)
+    opponent_possible_moves = [Action(ActionType.WAIT)] if node.game_state.opponent_state.is_waiting else node.game_state.opponent_state.possible_next_moves(node.game_state.trees, False)
 
     # Put random opponent move. TODO: See if getting each combination with itertools give better results
     for possible_move in possible_moves:
@@ -616,18 +598,23 @@ def mcts_backpropagation(node):
 
 # TODO: To improve
 def get_best_child(node):
-    [n for n in node.children if n is not None].sort(reverse=True, key=lambda n: n.total_games)
+    [n for n in node.children if n is not None].sort(reverse=True, key=lambda n: n.won_games)
     return node.children[0]
 
 
 def find_best_choice(node, turn_start, possible_moves):
     leaves = [node]
-
-    while timeit.default_timer() - turn_start < 0.05:
+    while timeit.default_timer() - turn_start < 0.07:
         best_node = mcts_selection(leaves)
+
+        if timeit.default_timer() - turn_start > 0.07:
+            break
 
         best_node_with_children = mcts_expansion(best_node)
         leaves.extend(best_node_with_children.children)
+
+        if timeit.default_timer() - turn_start > 0.06:
+            break
 
         # Randomly select one of the children
         the_chosen_one = random.choice(best_node_with_children.children)
@@ -655,62 +642,63 @@ def main():
         cells.append(Cell(index, richness))
 
     # game loop
-    while True:
-        day = int(input())  # the game lasts 24 days: 0-23
-        turn_duration = timeit.default_timer()
-        nutrients = int(input())  # the base score you gain from the next COMPLETE action
-        # sun: your sun points
-        # score: your current score
-        sun, score = [int(i) for i in input().split()]
+    # while True:
+    day = int(input())  # the game lasts 24 days: 0-23
+    turn_duration = timeit.default_timer()
+    nutrients = int(input())  # the base score you gain from the next COMPLETE action
+    # sun: your sun points
+    # score: your current score
+    sun, score = [int(i) for i in input().split()]
+    inputs = input().split()
+    opp_sun = int(inputs[0])  # opponent's sun points
+    opp_score = int(inputs[1])  # opponent's score
+    opp_is_waiting = inputs[2] != "0"  # whether your opponent is asleep until the next day
+    number_of_trees = int(input())  # the current amount of trees
+
+    trees = [None, None, None, None, None, None, None, None, None, None,
+             None, None, None, None, None, None, None, None, None, None,
+             None, None, None, None, None, None, None, None, None, None,
+             None, None, None, None, None, None, None]
+    # trees = []
+    trees_size = [0, 0, 0, 0]
+    opponent_trees_size = [0, 0, 0, 0]
+    for i in range(number_of_trees):
         inputs = input().split()
-        opp_sun = int(inputs[0])  # opponent's sun points
-        opp_score = int(inputs[1])  # opponent's score
-        opp_is_waiting = inputs[2] != "0"  # whether your opponent is asleep until the next day
-        number_of_trees = int(input())  # the current amount of trees
-
-        trees = [None, None, None, None, None, None, None, None, None, None,
-                 None, None, None, None, None, None, None, None, None, None,
-                 None, None, None, None, None, None, None, None, None, None,
-                 None, None, None, None, None, None, None]
-        # trees = []
-        trees_size = [0, 0, 0, 0]
-        opponent_trees_size = [0, 0, 0, 0]
-        for i in range(number_of_trees):
-            inputs = input().split()
-            cell_index = int(inputs[0])  # location of this tree
-            size = int(inputs[1])  # size of this tree: 0-3
-            is_mine = inputs[2] != "0"  # 1 if this is your tree
-            is_dormant = inputs[3] != "0"  # 1 if this tree is dormant
-            trees[cell_index] = Tree(cell_index, size, is_mine, is_dormant)
-            if is_mine:
-                trees_size[size] += 1
-            else:
-                opponent_trees_size[size] += 1
-
-        number_of_possible_moves = int(input())
-        possible_moves = [input() for _ in range(number_of_possible_moves)]
-
-        # Write an action using print
-        # To debug: print("Debug messages...", file=sys.stderr, flush=True)
-
-        # GROW cellIdx | SEED sourceIdx targetIdx | COMPLETE cellIdx | WAIT <message>
-        if len(possible_moves) == 1:
-            print(possible_moves[0])
+        cell_index = int(inputs[0])  # location of this tree
+        size = int(inputs[1])  # size of this tree: 0-3
+        is_mine = inputs[2] != "0"  # 1 if this is your tree
+        is_dormant = inputs[3] != "0"  # 1 if this tree is dormant
+        trees[cell_index] = Tree(cell_index, size, is_mine, is_dormant)
+        if is_mine:
+            trees_size[size] += 1
         else:
+            opponent_trees_size[size] += 1
 
-            player_state = PlayerState(sun, score, trees_size, None, False)
-            opponent_state = PlayerState(opp_sun, opp_score, opponent_trees_size, None, opp_is_waiting)
-            game_state = GameState(day, nutrients, number_of_trees, trees, player_state, opponent_state)
+    number_of_possible_moves = int(input())
+    possible_moves = [input() for _ in range(number_of_possible_moves)]
 
-            # node = mcts_expansion(Node(None, game_state))
+    # Write an action using print
+    # To debug: print("Debug messages...", file=sys.stderr, flush=True)
 
-            possible_moves.remove('WAIT')
-            move = find_best_choice(Node(None, game_state), turn_duration, possible_moves)
-            print(move)
+    # GROW cellIdx | SEED sourceIdx targetIdx | COMPLETE cellIdx | WAIT <message>
+    if len(possible_moves) == 1:
+        print(possible_moves[0])
+    else:
+
+        player_state = PlayerState(sun, score, trees_size, None, False)
+        opponent_state = PlayerState(opp_sun, opp_score, opponent_trees_size, None, opp_is_waiting)
+        game_state = GameState(day, nutrients, number_of_trees, trees, player_state, opponent_state)
+
+        # node = mcts_expansion(Node(None, game_state))
+
+        possible_moves.remove('WAIT')
+
+        move = find_best_choice(Node(None, game_state), turn_duration, possible_moves)
+        print(move)
 
 
 if __name__ == "__main__":
-    main()
+    cProfile.run('main()')
 
 # TODO: first turn, put timer to 1 second.
 # TODO: Reuse the data-structure if opponent move has been explored.
